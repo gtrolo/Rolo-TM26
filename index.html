@@ -20,33 +20,63 @@
   <!-- Babel voor in-browser JSX compilatie -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- Firebase Modular SDK Import Map -->
+  <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"
+      }
+    }
+  </script>
+
   <style>
-    /* Voorkom scroll-bounce en selectie op iOS voor een native app gevoel */
     body {
-      background-color: #0a0a0a; /* neutral-950 */
+      background-color: #0a0a0a;
       -webkit-user-select: none;
       user-select: none;
       -webkit-tap-highlight-color: transparent;
     }
-    input, textarea {
+    input, textarea, select {
       -webkit-user-select: auto;
       user-select: auto;
     }
-    /* Verberg scrollbars voor een schonere look */
-    .no-scrollbar::-webkit-scrollbar {
-      display: none;
-    }
-    .no-scrollbar {
-      -ms-overflow-style: none;
-      scrollbar-width: none;
-    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="bg-neutral-950 text-neutral-100 font-sans pb-12 selection:bg-blue-500/30">
   <div id="root"></div>
 
-  <script type="text/babel">
+  <script type="text/babel" data-type="module">
     const { useState, useMemo, useEffect } = React;
+    import { initializeApp } from 'firebase/app';
+    import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+    import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+
+    // =========================================================================
+    // ⚙️ FIREBASE CONFIGURATIE (VOOR CLOUD SYNC TUSSEN MAC & IPHONE)
+    // =========================================================================
+    // Maak een project op console.firebase.google.com en plak hier jouw keys.
+    // Laat je dit leeg? Dan gebruikt de app gewoon localStorage (offline).
+    const firebaseConfig = {
+      // apiKey: "JOUW_API_KEY",
+      // authDomain: "JOUW_PROJECT.firebaseapp.com",
+      // projectId: "JOUW_PROJECT",
+      // storageBucket: "JOUW_PROJECT.appspot.com",
+      // messagingSenderId: "123456789",
+      // appId: "1:123456789:web:abcdef"
+    };
+    // =========================================================================
+
+    const isFirebaseConfigured = Object.keys(firebaseConfig).length > 0;
+    let app, auth, db;
+    if (isFirebaseConfigured) {
+      app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+    }
 
     // --- HELPERS ---
     const roundToWhole = (val) => Math.round(val);
@@ -162,6 +192,7 @@
       const plan = useMemo(() => generatePlan(), []);
       const [currentWeek, setCurrentWeek] = useState(1);
       const [activeDay, setActiveDay] = useState('Monday');
+      const [user, setUser] = useState(null);
       
       const [completedSets, setCompletedSets] = useState({});
       const [repInputs, setRepInputs] = useState({});
@@ -180,12 +211,52 @@
       const [importString, setImportString] = useState("");
       const [migrationStatus, setMigrationStatus] = useState("");
 
-      // --- LOCAL STORAGE DATA FETCHING ---
+      // --- INITIALISATIE (FIREBASE OF LOCALSTORAGE) ---
       useEffect(() => {
-        const savedData = localStorage.getItem('rolo_tm_state');
-        if (savedData) {
-          try {
-            const d = JSON.parse(savedData);
+        if (isFirebaseConfigured) {
+          const initAuth = async () => {
+            try {
+              await signInAnonymously(auth);
+            } catch (err) {
+              console.error("Firebase Auth Error:", err);
+            }
+          };
+          initAuth();
+          const unsub = onAuthStateChanged(auth, setUser);
+          return () => unsub();
+        } else {
+          // Fallback naar localStorage als Firebase niet geconfigureerd is
+          const savedData = localStorage.getItem('rolo_tm_state');
+          if (savedData) {
+            try {
+              const d = JSON.parse(savedData);
+              setCompletedSets(d.sets || {});
+              setRepInputs(d.reps || {}); 
+              setWeightInputs(d.weights || {});
+              setExtraReps(d.extraReps || {});
+              setScaleInputs(d.scales || {});
+              setSessionCompleted(d.sessionCompleted || {});
+              if (d.userBw) setUserBw(d.userBw);
+              if (d.week) setCurrentWeek(d.week);
+            } catch (err) {
+              console.error("Fout bij laden lokale data:", err);
+            }
+          }
+          setLoading(false);
+        }
+      }, []);
+
+      // --- FIREBASE DATA FETCHING ---
+      useEffect(() => {
+        if (!isFirebaseConfigured || !user) return;
+        
+        // Sla data veilig op onder het anonieme User ID van dit device
+        // Met anonieme auth wordt dit ID gedeeld als ze dezelfde browser gebruiken,
+        // OF we gebruiken één vaste app-wijde map aangezien je het alleen zelf gebruikt.
+        const docRef = doc(db, 'users', 'rolo_master_account', 'training', 'state');
+        const unsub = onSnapshot(docRef, (snap) => {
+          if (snap.exists()) {
+            const d = snap.data();
             setCompletedSets(d.sets || {});
             setRepInputs(d.reps || {}); 
             setWeightInputs(d.weights || {});
@@ -194,22 +265,35 @@
             setSessionCompleted(d.sessionCompleted || {});
             if (d.userBw) setUserBw(d.userBw);
             if (d.week) setCurrentWeek(d.week);
-          } catch (err) {
-            console.error("Fout bij laden lokale data:", err);
           }
-        }
-        setLoading(false);
-      }, []);
+          setLoading(false);
+        }, (err) => {
+          console.error("Firestore Error:", err);
+          setLoading(false);
+        });
+
+        return () => unsub();
+      }, [user]);
 
       useEffect(() => {
         setShowSummary(false);
       }, [activeDay, currentWeek]);
 
-      // --- LOCAL STORAGE DATA SAVING ---
-      const saveLocalData = (sets, reps, wghts, extras, scales, bw, sessions, week) => {
+      // --- DATA SAVING (HYBRIDE) ---
+      const saveData = async (sets, reps, wghts, extras, scales, bw, sessions, week) => {
         setSyncing(true);
         const dataObj = { sets, reps, weights: wghts, extraReps: extras, scales, userBw: bw, sessionCompleted: sessions, week: week || currentWeek, updatedAt: new Date().toISOString() };
-        localStorage.setItem('rolo_tm_state', JSON.stringify(dataObj));
+        
+        if (isFirebaseConfigured && user) {
+          try {
+            const docRef = doc(db, 'users', 'rolo_master_account', 'training', 'state');
+            await setDoc(docRef, dataObj, { merge: true });
+          } catch (err) {
+            console.error("Fout bij Firebase opslag:", err);
+          }
+        } else {
+          localStorage.setItem('rolo_tm_state', JSON.stringify(dataObj));
+        }
         setTimeout(() => setSyncing(false), 300);
       };
 
@@ -219,7 +303,7 @@
         nextEx[setIdx] = !nextEx[setIdx];
         const nextAll = { ...completedSets, [exId]: nextEx };
         setCompletedSets(nextAll);
-        saveLocalData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+        saveData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
       };
 
       const handleRepInput = (exId, setIdx, value) => {
@@ -227,38 +311,54 @@
         const nextReps = { ...curReps, [setIdx]: value };
         const nextAll = { ...repInputs, [exId]: nextReps };
         setRepInputs(nextAll);
-        saveLocalData(completedSets, nextAll, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+        
+        clearTimeout(window.repTimeout);
+        window.repTimeout = setTimeout(() => {
+          saveData(completedSets, nextAll, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+        }, 1000);
       };
 
       const handleWeightInput = (exId, value) => {
         const nextWeights = { ...weightInputs, [exId]: value };
         setWeightInputs(nextWeights);
-        saveLocalData(completedSets, repInputs, nextWeights, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+        
+        clearTimeout(window.weightTimeout);
+        window.weightTimeout = setTimeout(() => {
+          saveData(completedSets, repInputs, nextWeights, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+        }, 1000);
       };
 
       const handleExtraReps = (exId, value) => {
         const nextExtras = { ...extraReps, [exId]: value };
         setExtraReps(nextExtras);
-        saveLocalData(completedSets, repInputs, weightInputs, nextExtras, scaleInputs, userBw, sessionCompleted, currentWeek);
+        
+        clearTimeout(window.extraTimeout);
+        window.extraTimeout = setTimeout(() => {
+          saveData(completedSets, repInputs, weightInputs, nextExtras, scaleInputs, userBw, sessionCompleted, currentWeek);
+        }, 1000);
       };
 
       const handleScaleInput = (exId, value) => {
         const nextScales = { ...scaleInputs, [exId]: parseInt(value) };
         setScaleInputs(nextScales);
-        saveLocalData(completedSets, repInputs, weightInputs, extraReps, nextScales, userBw, sessionCompleted, currentWeek);
+        saveData(completedSets, repInputs, weightInputs, extraReps, nextScales, userBw, sessionCompleted, currentWeek);
       };
 
       const handleBwInput = (value) => {
         const newBw = parseFloat(value) || 0;
         setUserBw(newBw);
-        saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, newBw, sessionCompleted, currentWeek);
+        
+        clearTimeout(window.bwTimeout);
+        window.bwTimeout = setTimeout(() => {
+          saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, newBw, sessionCompleted, currentWeek);
+        }, 1000);
       };
 
       const finishSession = () => {
         const key = `${currentWeek}-${activeDay}`;
         const nextSessions = { ...sessionCompleted, [key]: true };
         setSessionCompleted(nextSessions);
-        saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek);
+        saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek);
       };
 
       const isExDone = (id, total) => {
@@ -380,7 +480,7 @@
           if (data.bw) setUserBw(data.bw);
           setCurrentWeek(data.week || 1);
           
-          saveLocalData(data.sets || {}, data.reps || {}, data.weights || {}, data.extra || {}, data.scales || {}, data.bw || 85, data.sessionCompleted || {}, data.week || 1);
+          saveData(data.sets || {}, data.reps || {}, data.weights || {}, data.extra || {}, data.scales || {}, data.bw || 85, data.sessionCompleted || {}, data.week || 1);
           setMigrationStatus("✅ Data succesvol ingeladen!");
           setImportString("");
         } catch (err) {
@@ -410,7 +510,7 @@
                   <IconClose />
                 </button>
                 <h2 className="text-xl font-black italic text-white uppercase mb-2">Data Beheer</h2>
-                <p className="text-xs text-neutral-400 mb-6">Exporteer of Importeer je data als backup tussen apparaten.</p>
+                <p className="text-xs text-neutral-400 mb-6">Backup of zet live sync op via Firebase.</p>
                 
                 <div className="space-y-6">
                   <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800">
@@ -458,7 +558,7 @@
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-neutral-800 rounded-lg border border-neutral-700">
                   <IconSync syncing={syncing} />
                   <span className="text-[9px] font-black text-neutral-400 uppercase tracking-tighter w-12 text-center leading-none">
-                    {syncing ? 'SYNC' : 'SAFE'}
+                    {isFirebaseConfigured ? (syncing ? 'SYNC' : 'CLOUD') : 'LOKAAL'}
                   </span>
                 </div>
               </div>
@@ -485,12 +585,12 @@
 
             <section className="bg-neutral-900 rounded-[2.5rem] p-7 border border-neutral-800 shadow-xl">
               <div className="flex justify-between items-center mb-6">
-                <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="left" /></button>
+                <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="left" /></button>
                 <div className="text-center">
                   <p className="text-[9px] font-black text-blue-500 uppercase tracking-[0.3em] mb-1 italic leading-none">Training Phase</p>
                   <h2 className="text-3xl font-black italic text-white uppercase leading-none">WEEK {currentWeek}</h2>
                 </div>
-                <button onClick={() => { const w = Math.min(9, currentWeek + 1); setCurrentWeek(w); saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="right" /></button>
+                <button onClick={() => { const w = Math.min(9, currentWeek + 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="right" /></button>
               </div>
               <div className="h-2.5 bg-neutral-950 rounded-full border border-neutral-800 overflow-hidden shadow-inner">
                 <div className="h-full bg-[#0084ff] transition-all duration-700 shadow-[0_0_15px_rgba(0,132,255,0.4)]" style={{ width: `${progress}%` }} />
