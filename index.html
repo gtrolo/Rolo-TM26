@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Rolo Performance</title>
+  
+  <!-- iOS PWA Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Rolo TM">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & ReactDOM CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel voor in-browser JSX compilatie -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* Voorkom scroll-bounce en selectie op iOS voor een native app gevoel */
+    body {
+      background-color: #0a0a0a; /* neutral-950 */
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    input, textarea {
+      -webkit-user-select: auto;
+      user-select: auto;
+    }
+    /* Verberg scrollbars voor een schonere look */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-neutral-950 text-neutral-100 font-sans pb-12 selection:bg-blue-500/30">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    // --- HELPERS ---
+    const roundToWhole = (val) => Math.round(val);
+
+    const calculateWarmups = (weight) => {
+      if (!weight || weight <= 20) return [];
+      return [
+        { reps: "2x5", weight: 20 },
+        { reps: "1x3", weight: roundToWhole(weight * 0.6) },
+        { reps: "1x2", weight: roundToWhole(weight * 0.8) }
+      ];
+    };
+
+    const createEx = (id, name, sets, reps, weight, isAcc = false, isMaxReps = false, scaleType = null) => ({
+      id, name, sets, reps, 
+      weight: weight ? roundToWhole(weight) : null, 
+      isAcc,
+      isMaxReps,
+      scaleType,
+      warmups: isAcc ? [] : calculateWarmups(weight)
+    });
+
+    // --- ICONS (SVG) ---
+    const IconDumbbell = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6.5 6.5 11 11"/><path d="m10 10 5.5 5.5"/><path d="m3 21 8-8"/><path d="m9 22 10-10"/><path d="m2 19 10-10"/><path d="m14 3 8 8"/><path d="m9 2 10 10"/><path d="m13 11 8-8"/></svg>;
+    const IconChevron = ({ dir }) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{dir === 'left' ? <path d="m15 18-6-6 6-6"/> : <path d="m9 18 6-6-6-6"/>}</svg>;
+    const IconCheck = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>;
+    const IconSync = ({ syncing }) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={syncing ? "#ff6600" : "#22c55e"} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={syncing ? "animate-spin" : ""}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>;
+    const IconDownload = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
+    const IconSettings = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>;
+    const IconClose = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>;
+
+    // --- PLAN GENERATOR ---
+    const generatePlan = () => {
+      let w = {
+        Squat: { intensity: 82.5, volume: 75.0 }, 
+        Bench: { intensity: 55.0, volume: 50.0 },
+        Press: { intensity: 35.0, volume: 31.5 }, 
+        Deadlift: { intensity: 125.0 },
+        Clean: { volume: 61.0 }
+      };
+
+      const plan = [];
+      for (let week = 1; week <= 8; week++) {
+        const isBenchWeek = week % 2 !== 0;
+        const isAWeek = week % 2 !== 0;
+
+        const monAcc = isAWeek 
+          ? [
+              createEx(`w${week}-m-acc-0`, "Pull-ups", 3, "Max", null, true, true, 'pull'),
+              createEx(`w${week}-m-acc-1`, "Push-ups", 3, "Max", null, true, true, 'push'),
+              createEx(`w${week}-m-acc-2`, "Hanging Leg Raises", 3, "12", null, true, false, 'core')
+            ]
+          : [
+              createEx(`w${week}-m-acc-0`, "Chin-ups", 3, "Max", null, true, true, 'pull'),
+              createEx(`w${week}-m-acc-1`, "Dips", 3, "Max", null, true, true, 'push'),
+              createEx(`w${week}-m-acc-2`, "Plank", 3, "60s", null, true, false, 'core')
+            ];
+        
+        const friAcc = isAWeek
+          ? [
+              createEx(`w${week}-f-acc-0`, "Barbell Curls", 3, "10", null, true, false),
+              createEx(`w${week}-f-acc-1`, "Triceps Ext", 3, "12", null, true, false),
+              createEx(`w${week}-f-acc-2`, "Weighted Sit-ups", 3, "15", null, true, false)
+            ]
+          : [
+              createEx(`w${week}-f-acc-0`, "Hammer Curls", 3, "12", null, true, false),
+              createEx(`w${week}-f-acc-1`, "Skullcrushers", 3, "10", null, true, false),
+              createEx(`w${week}-f-acc-2`, "Russian Twists", 3, "20", null, true, false)
+            ];
+
+        plan.push({
+          week,
+          days: {
+            Monday: {
+              name: "Maandag (Volume)",
+              exercises: [
+                createEx(`w${week}-m-1`, "Squat", 5, 5, w.Squat.volume),
+                createEx(`w${week}-m-2`, isBenchWeek ? "Bench Press" : "Press", 5, 5, isBenchWeek ? w.Bench.volume : w.Press.volume),
+                createEx(`w${week}-m-3`, "Power Clean", 5, 3, w.Clean.volume),
+                ...monAcc
+              ]
+            },
+            Friday: {
+              name: "Vrijdag (Intensity)",
+              exercises: [
+                createEx(`w${week}-f-1`, "Squat", 1, 5, w.Squat.intensity),
+                createEx(`w${week}-f-2`, isBenchWeek ? "Bench Press" : "Press", 1, 5, isBenchWeek ? w.Bench.intensity : w.Press.intensity),
+                createEx(`w${week}-f-3`, "Deadlift", 1, 5, w.Deadlift.intensity),
+                ...friAcc
+              ]
+            }
+          }
+        });
+
+        w.Squat.intensity += 3.57; w.Squat.volume = w.Squat.intensity * 0.9;
+        w.Deadlift.intensity += 3.57; w.Clean.volume += 1.28;
+        if (isBenchWeek) { w.Bench.intensity += 1.66; w.Bench.volume = w.Bench.intensity * 0.9; } 
+        else { w.Press.intensity += 2.0; w.Press.volume = w.Press.intensity * 0.9; }
+      }
+
+      plan.push({
+        week: 9,
+        days: {
+          Monday: { name: "Maandag (Deload)", exercises: [createEx("w9-m-1", "Squat", 3, 5, 60), createEx("w9-m-2", "Press", 3, 5, 30), createEx("w9-m-3", "Power Clean", 3, 3, 40)] },
+          Friday: { name: "Vrijdag (Deload)", exercises: [createEx("w9-f-1", "Squat", 2, 5, 60), createEx("w9-f-2", "Bench Press", 2, 5, 40), createEx("w9-f-3", "Deadlift", 1, 5, 100)] }
+        }
+      });
+      return plan;
+    };
+
+    // --- MAIN COMPONENT ---
+    function App() {
+      const plan = useMemo(() => generatePlan(), []);
+      const [currentWeek, setCurrentWeek] = useState(1);
+      const [activeDay, setActiveDay] = useState('Monday');
+      
+      const [completedSets, setCompletedSets] = useState({});
+      const [repInputs, setRepInputs] = useState({});
+      const [weightInputs, setWeightInputs] = useState({});
+      const [extraReps, setExtraReps] = useState({}); 
+      const [scaleInputs, setScaleInputs] = useState({}); 
+      const [userBw, setUserBw] = useState(85); 
+      const [sessionCompleted, setSessionCompleted] = useState({});
+      
+      const [loading, setLoading] = useState(true);
+      const [syncing, setSyncing] = useState(false);
+      const [showSummary, setShowSummary] = useState(false);
+
+      const [showSettings, setShowSettings] = useState(false);
+      const [exportString, setExportString] = useState("");
+      const [importString, setImportString] = useState("");
+      const [migrationStatus, setMigrationStatus] = useState("");
+
+      // --- LOCAL STORAGE DATA FETCHING ---
+      useEffect(() => {
+        const savedData = localStorage.getItem('rolo_tm_state');
+        if (savedData) {
+          try {
+            const d = JSON.parse(savedData);
+            setCompletedSets(d.sets || {});
+            setRepInputs(d.reps || {}); 
+            setWeightInputs(d.weights || {});
+            setExtraReps(d.extraReps || {});
+            setScaleInputs(d.scales || {});
+            setSessionCompleted(d.sessionCompleted || {});
+            if (d.userBw) setUserBw(d.userBw);
+            if (d.week) setCurrentWeek(d.week);
+          } catch (err) {
+            console.error("Fout bij laden lokale data:", err);
+          }
+        }
+        setLoading(false);
+      }, []);
+
+      useEffect(() => {
+        setShowSummary(false);
+      }, [activeDay, currentWeek]);
+
+      // --- LOCAL STORAGE DATA SAVING ---
+      const saveLocalData = (sets, reps, wghts, extras, scales, bw, sessions, week) => {
+        setSyncing(true);
+        const dataObj = { sets, reps, weights: wghts, extraReps: extras, scales, userBw: bw, sessionCompleted: sessions, week: week || currentWeek, updatedAt: new Date().toISOString() };
+        localStorage.setItem('rolo_tm_state', JSON.stringify(dataObj));
+        setTimeout(() => setSyncing(false), 300);
+      };
+
+      const toggleSet = (exId, setIdx, total) => {
+        const curEx = completedSets[exId] || new Array(total).fill(false);
+        const nextEx = [...curEx];
+        nextEx[setIdx] = !nextEx[setIdx];
+        const nextAll = { ...completedSets, [exId]: nextEx };
+        setCompletedSets(nextAll);
+        saveLocalData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+      };
+
+      const handleRepInput = (exId, setIdx, value) => {
+        const curReps = repInputs[exId] || {};
+        const nextReps = { ...curReps, [setIdx]: value };
+        const nextAll = { ...repInputs, [exId]: nextReps };
+        setRepInputs(nextAll);
+        saveLocalData(completedSets, nextAll, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+      };
+
+      const handleWeightInput = (exId, value) => {
+        const nextWeights = { ...weightInputs, [exId]: value };
+        setWeightInputs(nextWeights);
+        saveLocalData(completedSets, repInputs, nextWeights, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+      };
+
+      const handleExtraReps = (exId, value) => {
+        const nextExtras = { ...extraReps, [exId]: value };
+        setExtraReps(nextExtras);
+        saveLocalData(completedSets, repInputs, weightInputs, nextExtras, scaleInputs, userBw, sessionCompleted, currentWeek);
+      };
+
+      const handleScaleInput = (exId, value) => {
+        const nextScales = { ...scaleInputs, [exId]: parseInt(value) };
+        setScaleInputs(nextScales);
+        saveLocalData(completedSets, repInputs, weightInputs, extraReps, nextScales, userBw, sessionCompleted, currentWeek);
+      };
+
+      const handleBwInput = (value) => {
+        const newBw = parseFloat(value) || 0;
+        setUserBw(newBw);
+        saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, newBw, sessionCompleted, currentWeek);
+      };
+
+      const finishSession = () => {
+        const key = `${currentWeek}-${activeDay}`;
+        const nextSessions = { ...sessionCompleted, [key]: true };
+        setSessionCompleted(nextSessions);
+        saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek);
+      };
+
+      const isExDone = (id, total) => {
+        const s = completedSets[id];
+        if (!s) return false;
+        return s.filter(v => v).length === total;
+      };
+
+      // --- STATS & EXPORT ---
+      const getExerciseStats = (ex, doneSetsCount) => {
+        let reps = 0;
+        if (ex.isAcc || ex.isMaxReps) {
+          for (let i = 0; i < ex.sets; i++) {
+            if (completedSets[ex.id] && completedSets[ex.id][i]) {
+              if (repInputs[ex.id] && repInputs[ex.id][i]) {
+                reps += parseInt(repInputs[ex.id][i]) || 0;
+              } else if (!ex.isMaxReps && ex.reps !== "60s") {
+                reps += parseInt(ex.reps) || 0;
+              }
+            }
+          }
+        } else {
+          reps = doneSetsCount * parseInt(ex.reps);
+        }
+
+        const extra = parseInt(extraReps[ex.id]) || 0;
+        const totalReps = reps + extra;
+
+        let effectiveWeight = 0;
+        const addedWeight = weightInputs[ex.id] ? parseFloat(weightInputs[ex.id]) : 0;
+
+        if (ex.scaleType) {
+          const scalePercent = scaleInputs[ex.id] || 0; 
+          const scaledBw = userBw * ((100 - scalePercent) / 100);
+          effectiveWeight = scaledBw + addedWeight; 
+        } else {
+          effectiveWeight = ex.weight || addedWeight;
+        }
+
+        let vol = totalReps * effectiveWeight;
+        return { reps: totalReps, vol: roundToWhole(vol), effectiveWeight: roundToWhole(effectiveWeight) };
+      };
+
+      const calculateDailySummary = () => {
+        let totalVol = 0;
+        let totalReps = 0;
+        const dayData = plan[currentWeek - 1]?.days[activeDay];
+        
+        if (dayData) {
+          dayData.exercises.forEach(ex => {
+            const cSets = completedSets[ex.id] || [];
+            const doneCount = cSets.filter(Boolean).length;
+            const extra = parseInt(extraReps[ex.id]) || 0;
+            
+            if (doneCount > 0 || extra > 0) {
+              const stats = getExerciseStats(ex, doneCount);
+              totalReps += stats.reps;
+              totalVol += stats.vol;
+            }
+          });
+        }
+        return { totalReps, totalVol };
+      };
+
+      const exportToExcel = () => {
+        let csvContent = "data:text/csv;charset=utf-8,";
+        csvContent += "Week;Dag;Oefening;Sets Voltooid;Reps Totaal;Gewicht Gebruikt (kg);Volume (kg)\n";
+
+        plan.forEach(w => {
+          ['Monday', 'Friday'].forEach(dayKey => {
+            const day = w.days[dayKey];
+            day.exercises.forEach(ex => {
+              const cSets = completedSets[ex.id] || [];
+              const doneCount = cSets.filter(Boolean).length;
+              const extra = parseInt(extraReps[ex.id]) || 0;
+              
+              if (doneCount > 0 || extra > 0) {
+                const stats = getExerciseStats(ex, doneCount);
+                
+                let weightStr = `${stats.effectiveWeight} kg`;
+                if (ex.scaleType) {
+                  const scale = scaleInputs[ex.id] || 0;
+                  const added = weightInputs[ex.id] ? parseFloat(weightInputs[ex.id]) : 0;
+                  weightStr = `BW${scale > 0 ? `-${scale}%` : ''}${added > 0 ? ` +${added}kg` : ''} = ${stats.effectiveWeight} kg`;
+                }
+
+                const row = [ w.week, day.name.replace(/,/g, ''), ex.name.replace(/,/g, ''), `${doneCount}/${ex.sets}`, stats.reps, weightStr, stats.vol ];
+                csvContent += row.join(";") + "\n";
+              }
+            });
+          });
+        });
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `Rolo_TM_Export_W${currentWeek}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const generateExportString = () => {
+        const data = { sets: completedSets, reps: repInputs, weights: weightInputs, extra: extraReps, scales: scaleInputs, bw: userBw, sessionCompleted, week: currentWeek };
+        const str = btoa(JSON.stringify(data));
+        setExportString(str);
+      };
+
+      const handleImport = () => {
+        try {
+          if (!importString) return;
+          const data = JSON.parse(atob(importString));
+          setCompletedSets(data.sets || {});
+          setRepInputs(data.reps || {});
+          setWeightInputs(data.weights || {});
+          setExtraReps(data.extra || {});
+          setScaleInputs(data.scales || {});
+          setSessionCompleted(data.sessionCompleted || {});
+          if (data.bw) setUserBw(data.bw);
+          setCurrentWeek(data.week || 1);
+          
+          saveLocalData(data.sets || {}, data.reps || {}, data.weights || {}, data.extra || {}, data.scales || {}, data.bw || 85, data.sessionCompleted || {}, data.week || 1);
+          setMigrationStatus("✅ Data succesvol ingeladen!");
+          setImportString("");
+        } catch (err) {
+          setMigrationStatus("❌ Fout: Ongeldige code.");
+        }
+      };
+
+      const dayData = plan[currentWeek - 1]?.days[activeDay];
+      const progress = (currentWeek / 9) * 100;
+      
+      const isCurrentSessionFinished = sessionCompleted[`${currentWeek}-${activeDay}`];
+      const dailySummary = isCurrentSessionFinished ? calculateDailySummary() : { totalReps: 0, totalVol: 0 };
+
+      if (loading) return (
+        <div className="min-h-screen flex flex-col items-center justify-center space-y-4 text-center px-4">
+          <div className="w-10 h-10 border-4 border-[#0084ff] border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      );
+
+      return (
+        <div>
+          {/* MIGRATIE MODAL */}
+          {showSettings && (
+            <div className="fixed inset-0 z-50 bg-neutral-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 w-full max-w-md shadow-2xl relative">
+                <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white">
+                  <IconClose />
+                </button>
+                <h2 className="text-xl font-black italic text-white uppercase mb-2">Data Beheer</h2>
+                <p className="text-xs text-neutral-400 mb-6">Exporteer of Importeer je data als backup tussen apparaten.</p>
+                
+                <div className="space-y-6">
+                  <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800">
+                    <h3 className="text-sm font-bold text-blue-500 mb-2">Maak Backup Code</h3>
+                    <button onClick={generateExportString} className="w-full py-2 bg-blue-600/20 text-blue-500 rounded-lg text-xs font-bold mb-2">Genereer Code</button>
+                    {exportString && (
+                      <textarea readOnly value={exportString} className="w-full h-20 bg-neutral-900 text-[10px] text-neutral-500 p-2 rounded border border-neutral-700 focus:outline-none" onClick={(e) => e.target.select()} />
+                    )}
+                  </div>
+
+                  <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800">
+                    <h3 className="text-sm font-bold text-[#ff6600] mb-2">Laad Data In</h3>
+                    <textarea 
+                      placeholder="Plak hier je code..." 
+                      value={importString}
+                      onChange={(e) => setImportString(e.target.value)}
+                      className="w-full h-20 bg-neutral-900 text-[10px] text-neutral-300 p-2 rounded border border-neutral-700 focus:outline-none mb-2"
+                    />
+                    <button onClick={handleImport} className="w-full py-2 bg-[#ff6600]/20 text-[#ff6600] rounded-lg text-xs font-bold">Importeer Data</button>
+                    {migrationStatus && <p className="text-xs mt-2 font-bold text-center">{migrationStatus}</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <header className="bg-neutral-900 border-b border-neutral-800 p-4 sticky top-0 z-20 shadow-xl">
+            <div className="max-w-md mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="bg-[#0084ff] p-2 rounded-xl shadow-lg shadow-blue-900/40">
+                  <IconDumbbell />
+                </div>
+                <div>
+                  <h1 className="text-lg font-black italic text-white uppercase leading-none tracking-tight">ROLO TM '26</h1>
+                  <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mt-1">Rolo Performance</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowSettings(true)} className="p-2 bg-neutral-800 rounded-lg border border-neutral-700 hover:bg-neutral-700 transition-colors text-neutral-400" title="Instellingen">
+                  <IconSettings />
+                </button>
+                <button onClick={exportToExcel} className="p-2 bg-neutral-800 rounded-lg border border-neutral-700 hover:bg-neutral-700 transition-colors text-blue-500" title="Export naar Excel">
+                  <IconDownload />
+                </button>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-neutral-800 rounded-lg border border-neutral-700">
+                  <IconSync syncing={syncing} />
+                  <span className="text-[9px] font-black text-neutral-400 uppercase tracking-tighter w-12 text-center leading-none">
+                    {syncing ? 'SYNC' : 'SAFE'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-md mx-auto p-4 space-y-6">
+            
+            <div className="flex justify-between items-center bg-neutral-900 border border-neutral-800 rounded-2xl p-4 shadow-sm">
+              <div>
+                <h3 className="text-sm font-black italic text-white uppercase">Mijn Bodyweight</h3>
+                <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Basis voor BW oefeningen</p>
+              </div>
+              <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-800 px-3 py-2 rounded-xl">
+                <input
+                  type="number"
+                  value={userBw}
+                  onChange={(e) => handleBwInput(e.target.value)}
+                  className="w-12 bg-transparent text-center text-lg font-black text-[#0084ff] focus:outline-none"
+                />
+                <span className="text-[10px] font-black text-neutral-500 uppercase">KG</span>
+              </div>
+            </div>
+
+            <section className="bg-neutral-900 rounded-[2.5rem] p-7 border border-neutral-800 shadow-xl">
+              <div className="flex justify-between items-center mb-6">
+                <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="left" /></button>
+                <div className="text-center">
+                  <p className="text-[9px] font-black text-blue-500 uppercase tracking-[0.3em] mb-1 italic leading-none">Training Phase</p>
+                  <h2 className="text-3xl font-black italic text-white uppercase leading-none">WEEK {currentWeek}</h2>
+                </div>
+                <button onClick={() => { const w = Math.min(9, currentWeek + 1); setCurrentWeek(w); saveLocalData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="right" /></button>
+              </div>
+              <div className="h-2.5 bg-neutral-950 rounded-full border border-neutral-800 overflow-hidden shadow-inner">
+                <div className="h-full bg-[#0084ff] transition-all duration-700 shadow-[0_0_15px_rgba(0,132,255,0.4)]" style={{ width: `${progress}%` }} />
+              </div>
+            </section>
+
+            <nav className="flex bg-neutral-900 p-1.5 rounded-2xl border border-neutral-800 shadow-inner">
+              <button onClick={() => setActiveDay('Monday')} className={`flex-1 py-3.5 text-[10px] font-black rounded-xl uppercase tracking-widest transition-all ${activeDay === 'Monday' ? 'bg-[#0084ff] text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-300'}`}>Maandag (Volume)</button>
+              <button onClick={() => setActiveDay('Friday')} className={`flex-1 py-3.5 text-[10px] font-black rounded-xl uppercase tracking-widest transition-all ${activeDay === 'Friday' ? 'bg-[#0084ff] text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-300'}`}>Vrijdag (Intensity)</button>
+            </nav>
+
+            <div className="space-y-4">
+              {dayData.exercises.map((ex) => {
+                const done = isExDone(ex.id, ex.sets);
+                const sets = completedSets[ex.id] || new Array(ex.sets).fill(false);
+                const repsData = repInputs[ex.id] || {};
+
+                return (
+                  <div key={ex.id} className={`bg-neutral-900 rounded-[2rem] border transition-all duration-500 ${done ? 'border-blue-600/30 opacity-60 bg-neutral-900/50' : 'border-neutral-800 shadow-2xl'}`}>
+                    <div className="p-6">
+                      <div className="flex justify-between items-start mb-5">
+                        <div className="w-full">
+                          {!ex.isAcc && ex.warmups.length > 0 && (
+                            <div className="flex gap-2.5 mb-2.5 overflow-x-auto pb-1 no-scrollbar">
+                              <span className="text-[8px] font-black text-[#ff6600] uppercase tracking-tighter shrink-0 pt-0.5">Warmup:</span>
+                              {ex.warmups.map((w, idx) => (
+                                <span key={idx} className="text-[8px] font-bold text-neutral-500 shrink-0">{w.reps} @ <span className="text-orange-500/80">{w.weight}kg</span></span>
+                              ))}
+                            </div>
+                          )}
+                          
+                          <h4 className={`text-xl font-black italic uppercase leading-tight ${done ? 'line-through decoration-blue-500 text-neutral-600' : 'text-white'}`}>{ex.name}</h4>
+                          
+                          {ex.scaleType && (
+                            <div className="mt-2 mb-3">
+                              <select
+                                value={scaleInputs[ex.id] || 0}
+                                onChange={(e) => handleScaleInput(ex.id, e.target.value)}
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-[11px] font-bold text-neutral-400 focus:outline-none focus:border-blue-500"
+                              >
+                                <option value={0}>Standaard (100% BW)</option>
+                                {ex.scaleType === 'pull' && (
+                                  <>
+                                    <option value={20}>Rode Stiek (-20%)</option>
+                                    <option value={40}>Blauwe Stiek (-40%)</option>
+                                    <option value={50}>Kipping / Assisted (-50%)</option>
+                                  </>
+                                )}
+                                {ex.scaleType === 'push' && (
+                                  <>
+                                    <option value={20}>Handen verhoogd (-20%)</option>
+                                    <option value={30}>Op knieën (-30%)</option>
+                                    <option value={50}>Sterk verhoogd / Assisted (-50%)</option>
+                                  </>
+                                )}
+                                {ex.scaleType === 'core' && (
+                                  <>
+                                    <option value={20}>Korte ROM (-20%)</option>
+                                    <option value={50}>Lichte variant (-50%)</option>
+                                  </>
+                                )}
+                              </select>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap items-center gap-3 mt-2">
+                            <span className="text-[10px] font-black text-neutral-500 bg-neutral-950 px-3 py-1 rounded-lg border border-neutral-800 tracking-widest uppercase">{ex.sets}x{ex.reps}</span>
+                            
+                            {ex.weight && <span className="text-xl font-black text-[#ff6600] italic tracking-tighter">{ex.weight} KG</span>}
+                            
+                            {ex.isAcc && (
+                              <div className="flex items-center gap-1.5" title={ex.scaleType ? "Extra gewicht toevoegen (+kg)" : "Gewicht"}>
+                                {ex.scaleType && <span className="text-[10px] text-neutral-500 font-bold">+</span>}
+                                <input
+                                  type="number"
+                                  placeholder="0"
+                                  value={weightInputs[ex.id] || ''}
+                                  onChange={(e) => handleWeightInput(ex.id, e.target.value)}
+                                  className="w-14 bg-neutral-950 border border-neutral-700 rounded-lg text-center text-sm font-black text-[#ff6600] focus:outline-none focus:border-blue-500 py-1 transition-colors"
+                                />
+                                <span className="text-[10px] font-black text-neutral-500 uppercase">KG</span>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-1 ml-auto bg-neutral-950 border border-neutral-800 px-2 py-1 rounded-lg">
+                              <span className="text-[10px] text-blue-500 font-bold">+</span>
+                              <input
+                                type="number"
+                                placeholder="0"
+                                value={extraReps[ex.id] || ''}
+                                onChange={(e) => handleExtraReps(ex.id, e.target.value)}
+                                className="w-8 bg-transparent text-center text-[11px] font-black text-blue-500 focus:outline-none"
+                              />
+                              <span className="text-[8px] font-black text-neutral-500 uppercase">Reps</span>
+                            </div>
+                          </div>
+                        </div>
+                        {done && <div className="bg-[#0084ff] rounded-full p-1.5 shadow-lg shadow-blue-900/40 shrink-0 mt-1"><IconCheck /></div>}
+                      </div>
+                      
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-wrap gap-3">
+                          {[...Array(ex.sets)].map((_, i) => {
+                            const val = sets[i];
+                            return (
+                              <div key={i} className="flex flex-col items-center gap-1">
+                                <button 
+                                  onClick={() => toggleSet(ex.id, i, ex.sets)} 
+                                  className={`w-12 h-12 rounded-2xl font-black text-sm flex items-center justify-center border-2 transition-all active:scale-75 ${val ? 'bg-[#0084ff] border-blue-400 text-white shadow-lg shadow-blue-500/20' : 'bg-neutral-950 border-neutral-800 text-neutral-600 hover:border-neutral-700'}`}
+                                >
+                                  {i + 1}
+                                </button>
+                                {ex.isAcc && (
+                                  <input
+                                    type="number"
+                                    placeholder="reps"
+                                    value={repsData[i] || ''}
+                                    onChange={(e) => handleRepInput(ex.id, i, e.target.value)}
+                                    className="w-12 bg-neutral-950 border border-neutral-800 rounded text-center text-[10px] font-bold text-[#ff6600] focus:outline-none focus:border-blue-500 py-1"
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {!isCurrentSessionFinished ? (
+              <button 
+                onClick={finishSession}
+                className="w-full mt-8 py-5 bg-[#0084ff] hover:bg-blue-600 text-white rounded-3xl font-black italic uppercase tracking-widest text-lg shadow-[0_0_20px_rgba(0,132,255,0.4)] transition-all active:scale-95"
+              >
+                Sessie Afronden
+              </button>
+            ) : (
+              <div className="mt-8 p-6 bg-neutral-900 border border-blue-500/30 rounded-3xl shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#ff6600] via-[#0084ff] to-[#ff6600]"></div>
+                <h3 className="text-xl font-black italic text-white uppercase text-center mb-6">Sessie Samenvatting</h3>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-neutral-950 border border-neutral-800 p-4 rounded-2xl text-center">
+                    <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Totaal Volume</p>
+                    <p className="text-3xl font-black text-[#ff6600] italic">{dailySummary.totalVol} <span className="text-sm">KG</span></p>
+                  </div>
+                  <div className="bg-neutral-950 border border-neutral-800 p-4 rounded-2xl text-center">
+                    <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest mb-1">Totaal Reps</p>
+                    <p className="text-3xl font-black text-[#0084ff] italic">{dailySummary.totalReps}</p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={exportToExcel}
+                  className="w-full mt-6 py-4 bg-neutral-800 hover:bg-neutral-700 text-white border border-neutral-700 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 transition-all active:scale-95"
+                >
+                  <IconDownload /> Exporteer Historie (CSV)
+                </button>
+              </div>
+            )}
+
+          </main>
+
+          <footer className="py-12 text-center opacity-40 italic">
+            <p className="text-[8px] font-black uppercase tracking-[0.5em] text-neutral-500 italic">Ronald Gosens • Rolo Performance</p>
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
