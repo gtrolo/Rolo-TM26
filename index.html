@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="nl">
 <head>
   <meta charset="UTF-8">
@@ -44,6 +44,13 @@
     }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    /* Verberg pijltjes in number inputs voor een cleane look */
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; 
+      margin: 0; 
+    }
   </style>
 </head>
 <body class="bg-neutral-950 text-neutral-100 font-sans pb-12 selection:bg-blue-500/30">
@@ -56,10 +63,8 @@
     import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
     // =========================================================================
-    // ⚙️ FIREBASE CONFIGURATIE (VOOR CLOUD SYNC TUSSEN MAC & IPHONE)
+    // ⚙️ FIREBASE CONFIGURATIE
     // =========================================================================
-    // Maak een project op console.firebase.google.com en plak hier jouw keys.
-    // Laat je dit leeg? Dan gebruikt de app gewoon localStorage (offline).
 const firebaseConfig = {
   apiKey: "AIzaSyAEEBn38XoGU14akrDgZQH2LGY5L5KHUGs",
   authDomain: "rolo-tm26.firebaseapp.com",
@@ -68,7 +73,6 @@ const firebaseConfig = {
   messagingSenderId: "784891630315",
   appId: "1:784891630315:web:ac005598d570965ab9e4ae"
 };
-
     // =========================================================================
 
     const isFirebaseConfigured = Object.keys(firebaseConfig).length > 0;
@@ -110,7 +114,7 @@ const firebaseConfig = {
     const IconClose = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>;
 
     // --- PLAN GENERATOR ---
-    const generatePlan = () => {
+    const generatePlan = (overrides = {}) => {
       let w = {
         Squat: { intensity: 82.5, volume: 75.0 }, 
         Bench: { intensity: 55.0, volume: 50.0 },
@@ -123,6 +127,23 @@ const firebaseConfig = {
       for (let week = 1; week <= 8; week++) {
         const isBenchWeek = week % 2 !== 0;
         const isAWeek = week % 2 !== 0;
+
+        // Cascadeer handmatige gewichten
+        if (overrides[`w${week}-m-1`]) { w.Squat.volume = overrides[`w${week}-m-1`]; w.Squat.intensity = w.Squat.volume / 0.9; }
+        if (isBenchWeek) {
+          if (overrides[`w${week}-m-2`]) { w.Bench.volume = overrides[`w${week}-m-2`]; w.Bench.intensity = w.Bench.volume / 0.9; }
+        } else {
+          if (overrides[`w${week}-m-2`]) { w.Press.volume = overrides[`w${week}-m-2`]; w.Press.intensity = w.Press.volume / 0.9; }
+        }
+        if (overrides[`w${week}-m-3`]) { w.Clean.volume = overrides[`w${week}-m-3`]; }
+
+        if (overrides[`w${week}-f-1`]) { w.Squat.intensity = overrides[`w${week}-f-1`]; w.Squat.volume = w.Squat.intensity * 0.9; }
+        if (isBenchWeek) {
+          if (overrides[`w${week}-f-2`]) { w.Bench.intensity = overrides[`w${week}-f-2`]; w.Bench.volume = w.Bench.intensity * 0.9; }
+        } else {
+          if (overrides[`w${week}-f-2`]) { w.Press.intensity = overrides[`w${week}-f-2`]; w.Press.volume = w.Press.intensity * 0.9; }
+        }
+        if (overrides[`w${week}-f-3`]) { w.Deadlift.intensity = overrides[`w${week}-f-3`]; }
 
         const monAcc = isAWeek 
           ? [
@@ -172,17 +193,27 @@ const firebaseConfig = {
           }
         });
 
+        // Wiskundige progressie voor de volgende week
         w.Squat.intensity += 3.57; w.Squat.volume = w.Squat.intensity * 0.9;
         w.Deadlift.intensity += 3.57; w.Clean.volume += 1.28;
         if (isBenchWeek) { w.Bench.intensity += 1.66; w.Bench.volume = w.Bench.intensity * 0.9; } 
         else { w.Press.intensity += 2.0; w.Press.volume = w.Press.intensity * 0.9; }
       }
 
+      // Deload week
+      let w9 = { SquatVol: 60, Press: 30, Clean: 40, SquatInt: 60, Bench: 40, Deadlift: 100 };
+      if (overrides[`w9-m-1`]) w9.SquatVol = overrides[`w9-m-1`];
+      if (overrides[`w9-m-2`]) w9.Press = overrides[`w9-m-2`];
+      if (overrides[`w9-m-3`]) w9.Clean = overrides[`w9-m-3`];
+      if (overrides[`w9-f-1`]) w9.SquatInt = overrides[`w9-f-1`];
+      if (overrides[`w9-f-2`]) w9.Bench = overrides[`w9-f-2`];
+      if (overrides[`w9-f-3`]) w9.Deadlift = overrides[`w9-f-3`];
+
       plan.push({
         week: 9,
         days: {
-          Monday: { name: "Maandag (Deload)", exercises: [createEx("w9-m-1", "Squat", 3, 5, 60), createEx("w9-m-2", "Press", 3, 5, 30), createEx("w9-m-3", "Power Clean", 3, 3, 40)] },
-          Friday: { name: "Vrijdag (Deload)", exercises: [createEx("w9-f-1", "Squat", 2, 5, 60), createEx("w9-f-2", "Bench Press", 2, 5, 40), createEx("w9-f-3", "Deadlift", 1, 5, 100)] }
+          Monday: { name: "Maandag (Deload)", exercises: [createEx("w9-m-1", "Squat", 3, 5, w9.SquatVol), createEx("w9-m-2", "Press", 3, 5, w9.Press), createEx("w9-m-3", "Power Clean", 3, 3, w9.Clean)] },
+          Friday: { name: "Vrijdag (Deload)", exercises: [createEx("w9-f-1", "Squat", 2, 5, w9.SquatInt), createEx("w9-f-2", "Bench Press", 2, 5, w9.Bench), createEx("w9-f-3", "Deadlift", 1, 5, w9.Deadlift)] }
         }
       });
       return plan;
@@ -190,19 +221,21 @@ const firebaseConfig = {
 
     // --- MAIN COMPONENT ---
     function App() {
-      const plan = useMemo(() => generatePlan(), []);
+      const [user, setUser] = useState(null);
       const [currentWeek, setCurrentWeek] = useState(1);
       const [activeDay, setActiveDay] = useState('Monday');
-      const [user, setUser] = useState(null);
       
       const [completedSets, setCompletedSets] = useState({});
       const [repInputs, setRepInputs] = useState({});
       const [weightInputs, setWeightInputs] = useState({});
       const [extraReps, setExtraReps] = useState({}); 
       const [scaleInputs, setScaleInputs] = useState({}); 
+      const [baseWeightOverrides, setBaseWeightOverrides] = useState({}); 
       const [userBw, setUserBw] = useState(85); 
       const [sessionCompleted, setSessionCompleted] = useState({});
       
+      const plan = useMemo(() => generatePlan(baseWeightOverrides), [baseWeightOverrides]);
+
       const [loading, setLoading] = useState(true);
       const [syncing, setSyncing] = useState(false);
       const [showSummary, setShowSummary] = useState(false);
@@ -212,21 +245,16 @@ const firebaseConfig = {
       const [importString, setImportString] = useState("");
       const [migrationStatus, setMigrationStatus] = useState("");
 
-      // --- INITIALISATIE (FIREBASE OF LOCALSTORAGE) ---
       useEffect(() => {
         if (isFirebaseConfigured) {
           const initAuth = async () => {
-            try {
-              await signInAnonymously(auth);
-            } catch (err) {
-              console.error("Firebase Auth Error:", err);
-            }
+            try { await signInAnonymously(auth); } 
+            catch (err) { console.error("Firebase Auth Error:", err); }
           };
           initAuth();
           const unsub = onAuthStateChanged(auth, setUser);
           return () => unsub();
         } else {
-          // Fallback naar localStorage als Firebase niet geconfigureerd is
           const savedData = localStorage.getItem('rolo_tm_state');
           if (savedData) {
             try {
@@ -236,24 +264,18 @@ const firebaseConfig = {
               setWeightInputs(d.weights || {});
               setExtraReps(d.extraReps || {});
               setScaleInputs(d.scales || {});
+              setBaseWeightOverrides(d.overrides || {});
               setSessionCompleted(d.sessionCompleted || {});
               if (d.userBw) setUserBw(d.userBw);
               if (d.week) setCurrentWeek(d.week);
-            } catch (err) {
-              console.error("Fout bij laden lokale data:", err);
-            }
+            } catch (err) { console.error("Fout bij laden lokale data:", err); }
           }
           setLoading(false);
         }
       }, []);
 
-      // --- FIREBASE DATA FETCHING ---
       useEffect(() => {
         if (!isFirebaseConfigured || !user) return;
-        
-        // Sla data veilig op onder het anonieme User ID van dit device
-        // Met anonieme auth wordt dit ID gedeeld als ze dezelfde browser gebruiken,
-        // OF we gebruiken één vaste app-wijde map aangezien je het alleen zelf gebruikt.
         const docRef = doc(db, 'users', 'rolo_master_account', 'training', 'state');
         const unsub = onSnapshot(docRef, (snap) => {
           if (snap.exists()) {
@@ -263,6 +285,7 @@ const firebaseConfig = {
             setWeightInputs(d.weights || {});
             setExtraReps(d.extraReps || {});
             setScaleInputs(d.scales || {});
+            setBaseWeightOverrides(d.overrides || {});
             setSessionCompleted(d.sessionCompleted || {});
             if (d.userBw) setUserBw(d.userBw);
             if (d.week) setCurrentWeek(d.week);
@@ -280,22 +303,35 @@ const firebaseConfig = {
         setShowSummary(false);
       }, [activeDay, currentWeek]);
 
-      // --- DATA SAVING (HYBRIDE) ---
-      const saveData = async (sets, reps, wghts, extras, scales, bw, sessions, week) => {
+      const saveData = async (sets, reps, wghts, extras, scales, bw, sessions, week, ovrs) => {
         setSyncing(true);
-        const dataObj = { sets, reps, weights: wghts, extraReps: extras, scales, userBw: bw, sessionCompleted: sessions, week: week || currentWeek, updatedAt: new Date().toISOString() };
+        const activeOvrs = ovrs !== undefined ? ovrs : baseWeightOverrides;
+        const dataObj = { sets, reps, weights: wghts, extraReps: extras, scales, userBw: bw, sessionCompleted: sessions, week: week || currentWeek, overrides: activeOvrs, updatedAt: new Date().toISOString() };
         
         if (isFirebaseConfigured && user) {
           try {
             const docRef = doc(db, 'users', 'rolo_master_account', 'training', 'state');
             await setDoc(docRef, dataObj, { merge: true });
-          } catch (err) {
-            console.error("Fout bij Firebase opslag:", err);
-          }
+          } catch (err) { console.error("Fout bij Firebase opslag:", err); }
         } else {
           localStorage.setItem('rolo_tm_state', JSON.stringify(dataObj));
         }
         setTimeout(() => setSyncing(false), 300);
+      };
+
+      const handleBaseWeightChange = (exId, value) => {
+        const nextOvrs = { ...baseWeightOverrides };
+        if (value === '') {
+          delete nextOvrs[exId];
+        } else {
+          nextOvrs[exId] = parseFloat(value);
+        }
+        setBaseWeightOverrides(nextOvrs);
+
+        clearTimeout(window.ovrTimeout);
+        window.ovrTimeout = setTimeout(() => {
+          saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, nextOvrs);
+        }, 1000);
       };
 
       const toggleSet = (exId, setIdx, total) => {
@@ -304,7 +340,7 @@ const firebaseConfig = {
         nextEx[setIdx] = !nextEx[setIdx];
         const nextAll = { ...completedSets, [exId]: nextEx };
         setCompletedSets(nextAll);
-        saveData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
+        saveData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides);
       };
 
       const handleRepInput = (exId, setIdx, value) => {
@@ -312,54 +348,42 @@ const firebaseConfig = {
         const nextReps = { ...curReps, [setIdx]: value };
         const nextAll = { ...repInputs, [exId]: nextReps };
         setRepInputs(nextAll);
-        
         clearTimeout(window.repTimeout);
-        window.repTimeout = setTimeout(() => {
-          saveData(completedSets, nextAll, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
-        }, 1000);
+        window.repTimeout = setTimeout(() => saveData(completedSets, nextAll, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
       };
 
       const handleWeightInput = (exId, value) => {
         const nextWeights = { ...weightInputs, [exId]: value };
         setWeightInputs(nextWeights);
-        
         clearTimeout(window.weightTimeout);
-        window.weightTimeout = setTimeout(() => {
-          saveData(completedSets, repInputs, nextWeights, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek);
-        }, 1000);
+        window.weightTimeout = setTimeout(() => saveData(completedSets, repInputs, nextWeights, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
       };
 
       const handleExtraReps = (exId, value) => {
         const nextExtras = { ...extraReps, [exId]: value };
         setExtraReps(nextExtras);
-        
         clearTimeout(window.extraTimeout);
-        window.extraTimeout = setTimeout(() => {
-          saveData(completedSets, repInputs, weightInputs, nextExtras, scaleInputs, userBw, sessionCompleted, currentWeek);
-        }, 1000);
+        window.extraTimeout = setTimeout(() => saveData(completedSets, repInputs, weightInputs, nextExtras, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
       };
 
       const handleScaleInput = (exId, value) => {
         const nextScales = { ...scaleInputs, [exId]: parseInt(value) };
         setScaleInputs(nextScales);
-        saveData(completedSets, repInputs, weightInputs, extraReps, nextScales, userBw, sessionCompleted, currentWeek);
+        saveData(completedSets, repInputs, weightInputs, extraReps, nextScales, userBw, sessionCompleted, currentWeek, baseWeightOverrides);
       };
 
       const handleBwInput = (value) => {
         const newBw = parseFloat(value) || 0;
         setUserBw(newBw);
-        
         clearTimeout(window.bwTimeout);
-        window.bwTimeout = setTimeout(() => {
-          saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, newBw, sessionCompleted, currentWeek);
-        }, 1000);
+        window.bwTimeout = setTimeout(() => saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, newBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
       };
 
       const finishSession = () => {
         const key = `${currentWeek}-${activeDay}`;
         const nextSessions = { ...sessionCompleted, [key]: true };
         setSessionCompleted(nextSessions);
-        saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek);
+        saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek, baseWeightOverrides);
       };
 
       const isExDone = (id, total) => {
@@ -368,7 +392,6 @@ const firebaseConfig = {
         return s.filter(v => v).length === total;
       };
 
-      // --- STATS & EXPORT ---
       const getExerciseStats = (ex, doneSetsCount) => {
         let reps = 0;
         if (ex.isAcc || ex.isMaxReps) {
@@ -413,7 +436,6 @@ const firebaseConfig = {
             const cSets = completedSets[ex.id] || [];
             const doneCount = cSets.filter(Boolean).length;
             const extra = parseInt(extraReps[ex.id]) || 0;
-            
             if (doneCount > 0 || extra > 0) {
               const stats = getExerciseStats(ex, doneCount);
               totalReps += stats.reps;
@@ -435,17 +457,14 @@ const firebaseConfig = {
               const cSets = completedSets[ex.id] || [];
               const doneCount = cSets.filter(Boolean).length;
               const extra = parseInt(extraReps[ex.id]) || 0;
-              
               if (doneCount > 0 || extra > 0) {
                 const stats = getExerciseStats(ex, doneCount);
-                
                 let weightStr = `${stats.effectiveWeight} kg`;
                 if (ex.scaleType) {
                   const scale = scaleInputs[ex.id] || 0;
                   const added = weightInputs[ex.id] ? parseFloat(weightInputs[ex.id]) : 0;
                   weightStr = `BW${scale > 0 ? `-${scale}%` : ''}${added > 0 ? ` +${added}kg` : ''} = ${stats.effectiveWeight} kg`;
                 }
-
                 const row = [ w.week, day.name.replace(/,/g, ''), ex.name.replace(/,/g, ''), `${doneCount}/${ex.sets}`, stats.reps, weightStr, stats.vol ];
                 csvContent += row.join(";") + "\n";
               }
@@ -463,7 +482,7 @@ const firebaseConfig = {
       };
 
       const generateExportString = () => {
-        const data = { sets: completedSets, reps: repInputs, weights: weightInputs, extra: extraReps, scales: scaleInputs, bw: userBw, sessionCompleted, week: currentWeek };
+        const data = { sets: completedSets, reps: repInputs, weights: weightInputs, extra: extraReps, scales: scaleInputs, overrides: baseWeightOverrides, bw: userBw, sessionCompleted, week: currentWeek };
         const str = btoa(JSON.stringify(data));
         setExportString(str);
       };
@@ -477,11 +496,12 @@ const firebaseConfig = {
           setWeightInputs(data.weights || {});
           setExtraReps(data.extra || {});
           setScaleInputs(data.scales || {});
+          setBaseWeightOverrides(data.overrides || {});
           setSessionCompleted(data.sessionCompleted || {});
           if (data.bw) setUserBw(data.bw);
           setCurrentWeek(data.week || 1);
           
-          saveData(data.sets || {}, data.reps || {}, data.weights || {}, data.extra || {}, data.scales || {}, data.bw || 85, data.sessionCompleted || {}, data.week || 1);
+          saveData(data.sets || {}, data.reps || {}, data.weights || {}, data.extra || {}, data.scales || {}, data.bw || 85, data.sessionCompleted || {}, data.week || 1, data.overrides || {});
           setMigrationStatus("✅ Data succesvol ingeladen!");
           setImportString("");
         } catch (err) {
@@ -586,12 +606,12 @@ const firebaseConfig = {
 
             <section className="bg-neutral-900 rounded-[2.5rem] p-7 border border-neutral-800 shadow-xl">
               <div className="flex justify-between items-center mb-6">
-                <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="left" /></button>
+                <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w, baseWeightOverrides); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="left" /></button>
                 <div className="text-center">
                   <p className="text-[9px] font-black text-blue-500 uppercase tracking-[0.3em] mb-1 italic leading-none">Training Phase</p>
                   <h2 className="text-3xl font-black italic text-white uppercase leading-none">WEEK {currentWeek}</h2>
                 </div>
-                <button onClick={() => { const w = Math.min(9, currentWeek + 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="right" /></button>
+                <button onClick={() => { const w = Math.min(9, currentWeek + 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w, baseWeightOverrides); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="right" /></button>
               </div>
               <div className="h-2.5 bg-neutral-950 rounded-full border border-neutral-800 overflow-hidden shadow-inner">
                 <div className="h-full bg-[#0084ff] transition-all duration-700 shadow-[0_0_15px_rgba(0,132,255,0.4)]" style={{ width: `${progress}%` }} />
@@ -660,10 +680,23 @@ const firebaseConfig = {
                           <div className="flex flex-wrap items-center gap-3 mt-2">
                             <span className="text-[10px] font-black text-neutral-500 bg-neutral-950 px-3 py-1 rounded-lg border border-neutral-800 tracking-widest uppercase">{ex.sets}x{ex.reps}</span>
                             
-                            {ex.weight && <span className="text-xl font-black text-[#ff6600] italic tracking-tighter">{ex.weight} KG</span>}
+                            {/* Bewerkbaar Base Weight Veld voor grote lifts */}
+                            {ex.weight !== null && !ex.isAcc && (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  value={baseWeightOverrides[ex.id] !== undefined ? baseWeightOverrides[ex.id] : ex.weight}
+                                  onChange={(e) => handleBaseWeightChange(ex.id, e.target.value)}
+                                  className="w-14 bg-transparent text-xl font-black text-[#ff6600] italic tracking-tighter text-right border-b border-transparent focus:outline-none focus:border-[#ff6600] transition-colors"
+                                  title="Pas je startgewicht aan"
+                                />
+                                <span className="text-xl font-black text-[#ff6600] italic tracking-tighter">KG</span>
+                              </div>
+                            )}
                             
+                            {/* Extra gewicht voor accessoires */}
                             {ex.isAcc && (
-                              <div className="flex items-center gap-1.5" title={ex.scaleType ? "Extra gewicht toevoegen (+kg)" : "Gewicht"}>
+                              <div className="flex items-center gap-1.5" title="Extra gewicht toevoegen (+kg)">
                                 {ex.scaleType && <span className="text-[10px] text-neutral-500 font-bold">+</span>}
                                 <input
                                   type="number"
