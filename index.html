@@ -112,6 +112,7 @@ const firebaseConfig = {
     const IconDownload = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
     const IconSettings = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>;
     const IconClose = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>;
+    const IconClock = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
 
     // --- PLAN GENERATOR ---
     const generatePlan = (overrides = {}) => {
@@ -234,6 +235,10 @@ const firebaseConfig = {
       const [userBw, setUserBw] = useState(85); 
       const [sessionCompleted, setSessionCompleted] = useState({});
       
+      const [defaultRestTime, setDefaultRestTime] = useState(90); // in seconden
+      const [timeLeft, setTimeLeft] = useState(0);
+      const [timerActive, setTimerActive] = useState(false);
+
       const plan = useMemo(() => generatePlan(baseWeightOverrides), [baseWeightOverrides]);
 
       const [loading, setLoading] = useState(true);
@@ -268,6 +273,7 @@ const firebaseConfig = {
               setSessionCompleted(d.sessionCompleted || {});
               if (d.userBw) setUserBw(d.userBw);
               if (d.week) setCurrentWeek(d.week);
+              if (d.defaultRestTime) setDefaultRestTime(d.defaultRestTime);
             } catch (err) { console.error("Fout bij laden lokale data:", err); }
           }
           setLoading(false);
@@ -289,6 +295,7 @@ const firebaseConfig = {
             setSessionCompleted(d.sessionCompleted || {});
             if (d.userBw) setUserBw(d.userBw);
             if (d.week) setCurrentWeek(d.week);
+            if (d.defaultRestTime) setDefaultRestTime(d.defaultRestTime);
           }
           setLoading(false);
         }, (err) => {
@@ -303,10 +310,26 @@ const firebaseConfig = {
         setShowSummary(false);
       }, [activeDay, currentWeek]);
 
-      const saveData = async (sets, reps, wghts, extras, scales, bw, sessions, week, ovrs) => {
+      // Timer Logic
+      useEffect(() => {
+        let interval = null;
+        if (timerActive && timeLeft > 0) {
+          interval = setInterval(() => {
+            setTimeLeft(prev => prev - 1);
+          }, 1000);
+        } else if (timerActive && timeLeft === 0) {
+          if ('vibrate' in navigator) {
+            navigator.vibrate([200, 100, 200, 100, 200]); // Trillen als ie klaar is
+          }
+        }
+        return () => clearInterval(interval);
+      }, [timerActive, timeLeft]);
+
+      const saveData = async (sets, reps, wghts, extras, scales, bw, sessions, week, ovrs, restTime) => {
         setSyncing(true);
         const activeOvrs = ovrs !== undefined ? ovrs : baseWeightOverrides;
-        const dataObj = { sets, reps, weights: wghts, extraReps: extras, scales, userBw: bw, sessionCompleted: sessions, week: week || currentWeek, overrides: activeOvrs, updatedAt: new Date().toISOString() };
+        const activeRest = restTime !== undefined ? restTime : defaultRestTime;
+        const dataObj = { sets, reps, weights: wghts, extraReps: extras, scales, userBw: bw, sessionCompleted: sessions, week: week || currentWeek, overrides: activeOvrs, defaultRestTime: activeRest, updatedAt: new Date().toISOString() };
         
         if (isFirebaseConfigured && user) {
           try {
@@ -317,6 +340,12 @@ const firebaseConfig = {
           localStorage.setItem('rolo_tm_state', JSON.stringify(dataObj));
         }
         setTimeout(() => setSyncing(false), 300);
+      };
+
+      const handleDefaultRestChange = (val) => {
+        const newTime = parseInt(val);
+        setDefaultRestTime(newTime);
+        saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides, newTime);
       };
 
       const handleBaseWeightChange = (exId, value) => {
@@ -330,17 +359,25 @@ const firebaseConfig = {
 
         clearTimeout(window.ovrTimeout);
         window.ovrTimeout = setTimeout(() => {
-          saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, nextOvrs);
+          saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, nextOvrs, defaultRestTime);
         }, 1000);
       };
 
       const toggleSet = (exId, setIdx, total) => {
         const curEx = completedSets[exId] || new Array(total).fill(false);
         const nextEx = [...curEx];
+        const isCompletingSet = !nextEx[setIdx]; // Was false, we vinken hem nu af
+
         nextEx[setIdx] = !nextEx[setIdx];
         const nextAll = { ...completedSets, [exId]: nextEx };
         setCompletedSets(nextAll);
-        saveData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides);
+        saveData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime);
+
+        // Start timer als de set is afgevinkt
+        if (isCompletingSet) {
+          setTimeLeft(defaultRestTime);
+          setTimerActive(true);
+        }
       };
 
       const handleRepInput = (exId, setIdx, value) => {
@@ -349,41 +386,42 @@ const firebaseConfig = {
         const nextAll = { ...repInputs, [exId]: nextReps };
         setRepInputs(nextAll);
         clearTimeout(window.repTimeout);
-        window.repTimeout = setTimeout(() => saveData(completedSets, nextAll, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
+        window.repTimeout = setTimeout(() => saveData(completedSets, nextAll, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime), 1000);
       };
 
       const handleWeightInput = (exId, value) => {
         const nextWeights = { ...weightInputs, [exId]: value };
         setWeightInputs(nextWeights);
         clearTimeout(window.weightTimeout);
-        window.weightTimeout = setTimeout(() => saveData(completedSets, repInputs, nextWeights, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
+        window.weightTimeout = setTimeout(() => saveData(completedSets, repInputs, nextWeights, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime), 1000);
       };
 
       const handleExtraReps = (exId, value) => {
         const nextExtras = { ...extraReps, [exId]: value };
         setExtraReps(nextExtras);
         clearTimeout(window.extraTimeout);
-        window.extraTimeout = setTimeout(() => saveData(completedSets, repInputs, weightInputs, nextExtras, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
+        window.extraTimeout = setTimeout(() => saveData(completedSets, repInputs, weightInputs, nextExtras, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime), 1000);
       };
 
       const handleScaleInput = (exId, value) => {
         const nextScales = { ...scaleInputs, [exId]: parseInt(value) };
         setScaleInputs(nextScales);
-        saveData(completedSets, repInputs, weightInputs, extraReps, nextScales, userBw, sessionCompleted, currentWeek, baseWeightOverrides);
+        saveData(completedSets, repInputs, weightInputs, extraReps, nextScales, userBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime);
       };
 
       const handleBwInput = (value) => {
         const newBw = parseFloat(value) || 0;
         setUserBw(newBw);
         clearTimeout(window.bwTimeout);
-        window.bwTimeout = setTimeout(() => saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, newBw, sessionCompleted, currentWeek, baseWeightOverrides), 1000);
+        window.bwTimeout = setTimeout(() => saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, newBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime), 1000);
       };
 
       const finishSession = () => {
         const key = `${currentWeek}-${activeDay}`;
         const nextSessions = { ...sessionCompleted, [key]: true };
         setSessionCompleted(nextSessions);
-        saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek, baseWeightOverrides);
+        setTimerActive(false); // sluit timer af bij afronden
+        saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek, baseWeightOverrides, defaultRestTime);
       };
 
       const isExDone = (id, total) => {
@@ -482,7 +520,7 @@ const firebaseConfig = {
       };
 
       const generateExportString = () => {
-        const data = { sets: completedSets, reps: repInputs, weights: weightInputs, extra: extraReps, scales: scaleInputs, overrides: baseWeightOverrides, bw: userBw, sessionCompleted, week: currentWeek };
+        const data = { sets: completedSets, reps: repInputs, weights: weightInputs, extra: extraReps, scales: scaleInputs, overrides: baseWeightOverrides, bw: userBw, defaultRestTime, sessionCompleted, week: currentWeek };
         const str = btoa(JSON.stringify(data));
         setExportString(str);
       };
@@ -499,9 +537,10 @@ const firebaseConfig = {
           setBaseWeightOverrides(data.overrides || {});
           setSessionCompleted(data.sessionCompleted || {});
           if (data.bw) setUserBw(data.bw);
+          if (data.defaultRestTime) setDefaultRestTime(data.defaultRestTime);
           setCurrentWeek(data.week || 1);
           
-          saveData(data.sets || {}, data.reps || {}, data.weights || {}, data.extra || {}, data.scales || {}, data.bw || 85, data.sessionCompleted || {}, data.week || 1, data.overrides || {});
+          saveData(data.sets || {}, data.reps || {}, data.weights || {}, data.extra || {}, data.scales || {}, data.bw || 85, data.sessionCompleted || {}, data.week || 1, data.overrides || {}, data.defaultRestTime || 90);
           setMigrationStatus("✅ Data succesvol ingeladen!");
           setImportString("");
         } catch (err) {
@@ -523,17 +562,54 @@ const firebaseConfig = {
 
       return (
         <div>
-          {/* MIGRATIE MODAL */}
+          {/* FLOATING TIMER UI */}
+          {timerActive && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-neutral-900 border border-blue-500/30 shadow-[0_0_40px_rgba(0,132,255,0.3)] rounded-full px-5 py-3 flex items-center gap-4 z-50 transition-all duration-300">
+              <button onClick={() => setTimeLeft(prev => Math.max(0, prev - 30))} className="text-neutral-400 hover:text-white font-black px-3 py-1.5 bg-neutral-800 rounded-full text-xs transition-colors active:scale-90">-30s</button>
+              
+              <div className={`text-3xl font-black tabular-nums tracking-tighter w-20 text-center transition-colors duration-500 ${timeLeft === 0 ? 'text-red-500 animate-pulse' : 'text-[#0084ff]'}`}>
+                {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+              </div>
+              
+              <button onClick={() => setTimeLeft(prev => prev + 30)} className="text-neutral-400 hover:text-white font-black px-3 py-1.5 bg-neutral-800 rounded-full text-xs transition-colors active:scale-90">+30s</button>
+              
+              <div className="w-px h-8 bg-neutral-800 mx-1"></div>
+              <button onClick={() => setTimerActive(false)} className="text-neutral-500 hover:text-white p-2 transition-colors active:scale-90 bg-neutral-950 rounded-full"><IconClose /></button>
+            </div>
+          )}
+
+          {/* MIGRATIE & SETTINGS MODAL */}
           {showSettings && (
             <div className="fixed inset-0 z-50 bg-neutral-950/90 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 w-full max-w-md shadow-2xl relative">
                 <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white">
                   <IconClose />
                 </button>
-                <h2 className="text-xl font-black italic text-white uppercase mb-2">Data Beheer</h2>
-                <p className="text-xs text-neutral-400 mb-6">Backup of zet live sync op via Firebase.</p>
+                <h2 className="text-xl font-black italic text-white uppercase mb-2">Instellingen</h2>
+                <p className="text-xs text-neutral-400 mb-6">Voorkeuren en databeheer.</p>
                 
                 <div className="space-y-6">
+                  {/* Timer Voorkeuren */}
+                  <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="text-[#0084ff]"><IconClock /></div>
+                      <h3 className="text-sm font-bold text-white uppercase">Standaard Rusttijd</h3>
+                    </div>
+                    <select
+                      value={defaultRestTime}
+                      onChange={(e) => handleDefaultRestChange(e.target.value)}
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-lg p-3 text-sm font-bold text-white focus:outline-none focus:border-[#0084ff] transition-colors"
+                    >
+                      <option value={60}>60 seconden</option>
+                      <option value={90}>90 seconden</option>
+                      <option value={120}>2 minuten</option>
+                      <option value={150}>2.5 minuten</option>
+                      <option value={180}>3 minuten</option>
+                    </select>
+                    <p className="text-[10px] text-neutral-500 mt-2">Start automatisch zodra je een set afvinkt.</p>
+                  </div>
+
+                  {/* Data Management */}
                   <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-800">
                     <h3 className="text-sm font-bold text-blue-500 mb-2">Maak Backup Code</h3>
                     <button onClick={generateExportString} className="w-full py-2 bg-blue-600/20 text-blue-500 rounded-lg text-xs font-bold mb-2">Genereer Code</button>
@@ -606,12 +682,12 @@ const firebaseConfig = {
 
             <section className="bg-neutral-900 rounded-[2.5rem] p-7 border border-neutral-800 shadow-xl">
               <div className="flex justify-between items-center mb-6">
-                <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w, baseWeightOverrides); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="left" /></button>
+                <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w, baseWeightOverrides, defaultRestTime); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="left" /></button>
                 <div className="text-center">
                   <p className="text-[9px] font-black text-blue-500 uppercase tracking-[0.3em] mb-1 italic leading-none">Training Phase</p>
                   <h2 className="text-3xl font-black italic text-white uppercase leading-none">WEEK {currentWeek}</h2>
                 </div>
-                <button onClick={() => { const w = Math.min(9, currentWeek + 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w, baseWeightOverrides); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="right" /></button>
+                <button onClick={() => { const w = Math.min(9, currentWeek + 1); setCurrentWeek(w); saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, w, baseWeightOverrides, defaultRestTime); }} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-neutral-800 border border-neutral-700 active:scale-90 transition-all shadow-inner"><IconChevron dir="right" /></button>
               </div>
               <div className="h-2.5 bg-neutral-950 rounded-full border border-neutral-800 overflow-hidden shadow-inner">
                 <div className="h-full bg-[#0084ff] transition-all duration-700 shadow-[0_0_15px_rgba(0,132,255,0.4)]" style={{ width: `${progress}%` }} />
@@ -632,18 +708,18 @@ const firebaseConfig = {
                 return (
                   <div key={ex.id} className={`bg-neutral-900 rounded-[2rem] border transition-all duration-500 ${done ? 'border-blue-600/30 opacity-60 bg-neutral-900/50' : 'border-neutral-800 shadow-2xl'}`}>
                     <div className="p-6">
-                      <div className="flex justify-between items-start mb-5">
-                        <div className="w-full">
-                          {!ex.isAcc && ex.warmups.length > 0 && (
-                            <div className="flex gap-2.5 mb-2.5 overflow-x-auto pb-1 no-scrollbar">
-                              <span className="text-[8px] font-black text-[#ff6600] uppercase tracking-tighter shrink-0 pt-0.5">Warmup:</span>
-                              {ex.warmups.map((w, idx) => (
-                                <span key={idx} className="text-[8px] font-bold text-neutral-500 shrink-0">{w.reps} @ <span className="text-orange-500/80">{w.weight}kg</span></span>
-                              ))}
-                            </div>
-                          )}
-                          
-                          <h4 className={`text-xl font-black italic uppercase leading-tight ${done ? 'line-through decoration-blue-500 text-neutral-600' : 'text-white'}`}>{ex.name}</h4>
+                  <div className="flex justify-between items-start mb-5">
+                    <div className="w-full">
+                      {!ex.isAcc && ex.warmups.length > 0 && (
+                        <div className="flex gap-2.5 mb-2.5 overflow-x-auto pb-1 no-scrollbar items-center">
+                          <span className="text-[10px] font-black text-[#ff6600] uppercase tracking-tighter shrink-0">Warmup:</span>
+                          {ex.warmups.map((w, idx) => (
+                            <span key={idx} className="text-[10px] font-bold text-neutral-500 shrink-0">{w.reps} @ <span className="text-orange-500/80">{w.weight}kg</span></span>
+                          ))}
+                        </div>
+                      )}
+                      
+                      <h4 className={`text-xl font-black italic uppercase leading-tight ${done ? 'line-through decoration-blue-500 text-neutral-600' : 'text-white'}`}>{ex.name}</h4>
                           
                           {ex.scaleType && (
                             <div className="mt-2 mb-3">
