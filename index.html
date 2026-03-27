@@ -312,6 +312,30 @@ const firebaseConfig = {
         setShowSummary(false);
       }, [activeDay, currentWeek]);
 
+      // --- AUDIO UNLOCK TRICK VOOR iOS ---
+      const unlockAudio = () => {
+        try {
+          if (!audioCtxRef.current) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) audioCtxRef.current = new AudioContext();
+          }
+          const ctx = audioCtxRef.current;
+          if (ctx && ctx.state === 'suspended') {
+            ctx.resume();
+          }
+          // Speel een onhoorbaar geluidje van 1 milliseconde om iOS te forceren
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          gain.gain.value = 0; // Volume op 0 (stilte)
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.001);
+        } catch(e) {
+          console.log("Unlock fout:", e);
+        }
+      };
+
       // --- PIEP GELUID FUNCTIE ---
       const playBeep = () => {
         try {
@@ -407,17 +431,10 @@ const firebaseConfig = {
         setCompletedSets(nextAll);
         saveData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime);
 
-        // STIEKEME AUDIO UNLOCK VOOR APPLE: 
-        // Bij de tap op het scherm activeren we de audio chip.
-        if (!audioCtxRef.current) {
-          const AudioContext = window.AudioContext || window.webkitAudioContext;
-          if (AudioContext) audioCtxRef.current = new AudioContext();
-        }
-        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
-          audioCtxRef.current.resume();
-        }
+        // Forceer de audio unlock op het moment van de tap
+        unlockAudio();
 
-        // Start timer
+        // Start timer als de set is afgevinkt
         if (isCompletingSet) {
           setTimeLeft(defaultRestTime);
           setTimerActive(true);
@@ -752,18 +769,18 @@ const firebaseConfig = {
                 return (
                   <div key={ex.id} className={`bg-neutral-900 rounded-[2rem] border transition-all duration-500 ${done ? 'border-blue-600/30 opacity-60 bg-neutral-900/50' : 'border-neutral-800 shadow-2xl'}`}>
                     <div className="p-6">
-                  <div className="flex justify-between items-start mb-5">
-                    <div className="w-full">
-                      {!ex.isAcc && ex.warmups.length > 0 && (
-                        <div className="flex gap-2.5 mb-2.5 overflow-x-auto pb-1 no-scrollbar items-center">
-                          <span className="text-[10px] font-black text-[#ff6600] uppercase tracking-tighter shrink-0">Warmup:</span>
-                          {ex.warmups.map((w, idx) => (
-                            <span key={idx} className="text-[10px] font-bold text-neutral-500 shrink-0">{w.reps} @ <span className="text-orange-500/80">{w.weight}kg</span></span>
-                          ))}
-                        </div>
-                      )}
-                      
-                      <h4 className={`text-xl font-black italic uppercase leading-tight ${done ? 'line-through decoration-blue-500 text-neutral-600' : 'text-white'}`}>{ex.name}</h4>
+                      <div className="flex justify-between items-start mb-5">
+                        <div className="w-full">
+                          {!ex.isAcc && ex.warmups.length > 0 && (
+                            <div className="flex gap-2.5 mb-2.5 overflow-x-auto pb-1 no-scrollbar items-center">
+                              <span className="text-[10px] font-black text-[#ff6600] uppercase tracking-tighter shrink-0">Warmup:</span>
+                              {ex.warmups.map((w, idx) => (
+                                <span key={idx} className="text-[10px] font-bold text-neutral-500 shrink-0">{w.reps} @ <span className="text-orange-500/80">{w.weight}kg</span></span>
+                              ))}
+                            </div>
+                          )}
+                          
+                          <h4 className={`text-xl font-black italic uppercase leading-tight ${done ? 'line-through decoration-blue-500 text-neutral-600' : 'text-white'}`}>{ex.name}</h4>
                           
                           {ex.scaleType && (
                             <div className="mt-2 mb-3">
