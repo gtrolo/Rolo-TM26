@@ -57,7 +57,7 @@
   <div id="root"></div>
 
   <script type="text/babel" data-type="module">
-    const { useState, useMemo, useEffect } = React;
+    const { useState, useMemo, useEffect, useRef } = React;
     import { initializeApp } from 'firebase/app';
     import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
     import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
@@ -238,6 +238,8 @@ const firebaseConfig = {
       const [defaultRestTime, setDefaultRestTime] = useState(90); // in seconden
       const [timeLeft, setTimeLeft] = useState(0);
       const [timerActive, setTimerActive] = useState(false);
+      
+      const audioCtxRef = useRef(null); // Ref voor de Web Audio API
 
       const plan = useMemo(() => generatePlan(baseWeightOverrides), [baseWeightOverrides]);
 
@@ -310,7 +312,36 @@ const firebaseConfig = {
         setShowSummary(false);
       }, [activeDay, currentWeek]);
 
-      // Timer Logic
+      // --- PIEP GELUID FUNCTIE ---
+      const playBeep = () => {
+        try {
+          if (!audioCtxRef.current) return;
+          const ctx = audioCtxRef.current;
+          if (ctx.state === 'suspended') ctx.resume();
+
+          const playTone = (freq, startTime, duration) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(1, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+            osc.start(startTime);
+            osc.stop(startTime + duration);
+          };
+
+          // Dubbele piep genereren (zoals digitaal horloge)
+          const now = ctx.currentTime;
+          playTone(880, now, 0.15); // A5 toon
+          playTone(880, now + 0.2, 0.15); 
+        } catch(e) { 
+          console.log("Audio fout:", e); 
+        }
+      };
+
+      // --- TIMER LOGIC ---
       useEffect(() => {
         let interval = null;
         if (timerActive && timeLeft > 0) {
@@ -318,9 +349,12 @@ const firebaseConfig = {
             setTimeLeft(prev => prev - 1);
           }, 1000);
         } else if (timerActive && timeLeft === 0) {
+          // Trillen (werkt op Android, niet op iOS PWA)
           if ('vibrate' in navigator) {
-            navigator.vibrate([200, 100, 200, 100, 200]); // Trillen als ie klaar is
+            navigator.vibrate([200, 100, 200, 100, 200]); 
           }
+          // Geluid afspelen (werkt op iOS dankzij ontgrendeling bij de klik)
+          playBeep();
         }
         return () => clearInterval(interval);
       }, [timerActive, timeLeft]);
@@ -366,14 +400,24 @@ const firebaseConfig = {
       const toggleSet = (exId, setIdx, total) => {
         const curEx = completedSets[exId] || new Array(total).fill(false);
         const nextEx = [...curEx];
-        const isCompletingSet = !nextEx[setIdx]; // Was false, we vinken hem nu af
+        const isCompletingSet = !nextEx[setIdx]; 
 
         nextEx[setIdx] = !nextEx[setIdx];
         const nextAll = { ...completedSets, [exId]: nextEx };
         setCompletedSets(nextAll);
         saveData(nextAll, repInputs, weightInputs, extraReps, scaleInputs, userBw, sessionCompleted, currentWeek, baseWeightOverrides, defaultRestTime);
 
-        // Start timer als de set is afgevinkt
+        // STIEKEME AUDIO UNLOCK VOOR APPLE: 
+        // Bij de tap op het scherm activeren we de audio chip.
+        if (!audioCtxRef.current) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) audioCtxRef.current = new AudioContext();
+        }
+        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+          audioCtxRef.current.resume();
+        }
+
+        // Start timer
         if (isCompletingSet) {
           setTimeLeft(defaultRestTime);
           setTimerActive(true);
@@ -420,7 +464,7 @@ const firebaseConfig = {
         const key = `${currentWeek}-${activeDay}`;
         const nextSessions = { ...sessionCompleted, [key]: true };
         setSessionCompleted(nextSessions);
-        setTimerActive(false); // sluit timer af bij afronden
+        setTimerActive(false); 
         saveData(completedSets, repInputs, weightInputs, extraReps, scaleInputs, userBw, nextSessions, currentWeek, baseWeightOverrides, defaultRestTime);
       };
 
@@ -564,10 +608,10 @@ const firebaseConfig = {
         <div>
           {/* FLOATING TIMER UI */}
           {timerActive && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-neutral-900 border border-blue-500/30 shadow-[0_0_40px_rgba(0,132,255,0.3)] rounded-full px-5 py-3 flex items-center gap-4 z-50 transition-all duration-300">
+            <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full px-5 py-3 flex items-center gap-4 z-50 transition-all duration-300 ${timeLeft === 0 ? 'bg-red-950/90 border border-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] scale-110' : 'bg-neutral-900 border border-blue-500/30 shadow-[0_0_40px_rgba(0,132,255,0.3)]'}`}>
               <button onClick={() => setTimeLeft(prev => Math.max(0, prev - 30))} className="text-neutral-400 hover:text-white font-black px-3 py-1.5 bg-neutral-800 rounded-full text-xs transition-colors active:scale-90">-30s</button>
               
-              <div className={`text-3xl font-black tabular-nums tracking-tighter w-20 text-center transition-colors duration-500 ${timeLeft === 0 ? 'text-red-500 animate-pulse' : 'text-[#0084ff]'}`}>
+              <div className={`text-3xl font-black tabular-nums tracking-tighter w-20 text-center transition-colors duration-300 ${timeLeft === 0 ? 'text-white animate-pulse' : 'text-[#0084ff]'}`}>
                 {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
               </div>
               
